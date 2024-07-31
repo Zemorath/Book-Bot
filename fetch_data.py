@@ -8,11 +8,11 @@ def fetch_listing_details(listing_url):
     soup = BeautifulSoup(page.content, 'html.parser')
 
     # Scrape ISBN
-    isbn_element = soup.find("span", class_="isbn")
+    isbn_element = soup.find("span", class_="product-id")
     isbn = isbn_element.text.strip() if isbn_element else "N/A"
 
     # Scrape image URL
-    image_element = soup.find("img", class_="product-image")
+    image_element = soup.find(id="zoom")
     image_url = image_element['src'] if image_element else "N/A"
 
     return isbn, image_url
@@ -36,7 +36,7 @@ def search_book(book_title):
             price_class = item.find("div", class_="price")
             price_range = price_class.find_all("span", class_="value")
             prices = [price.text.strip() for price in price_range]
-            search_results.append((title_text, prices, listing_url, image_url, prices))
+            search_results.append((title_text, listing_url, isbn, image_url, prices))
     return search_results
 
 
