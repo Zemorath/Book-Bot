@@ -73,7 +73,9 @@ async def on_message(message):
 
                     bookfinder_data = search_bookfinder(isbn)
                     if bookfinder_data:
-                        bookfinder_message = f"**BookFinder Price Range:** {bookfinder_data['price_range']}\n**Range Minimum:** [Link]({bookfinder_data['first_listing_url']}) - {bookfinder_data['first_listing_price']}\n**Range Maximum:** [Link]({bookfinder_data['fifth_listing_url']}) - {bookfinder_data['fifth_listing_price']}"
+                        bookfinder_message = (f"**BookFinder Price Range:** {bookfinder_data['price_range']}\n"
+                                  f"**Range Minimum:** [{bookfinder_data['first_store']}]({bookfinder_data['first_listing_url']}) - {bookfinder_data['first_listing_price']}\n"
+                                  f"**Range Maximum:** [{bookfinder_data['fifth_store']}]({bookfinder_data['fifth_listing_url']}) - {bookfinder_data['fifth_listing_price']}")
                         await message.channel.send(bookfinder_message)
                     else:
                         await message.channel.send('No suitable format found on BookFinder.')

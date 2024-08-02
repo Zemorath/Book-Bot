@@ -47,17 +47,21 @@ def search_bookfinder(book_isbn):
         
         first_url = first_listing.get_attribute('href') if first_listing else "N/A"
         first_price = first_listing.text.strip() if first_listing else "N/A"
+        first_store = first_listing.get_attribute("data-ga-pageview-bookstore")
 
         fifth_url = fifth_listing.get_attribute('href') if fifth_listing else "N/A"
         fifth_price = fifth_listing.text.strip() if fifth_listing else "N/A"
+        fifth_store = fifth_listing.get_attribute("data-ga-pageview-bookstore")
 
         price_range = f"{first_price} - {fifth_price}"
         return {
             "price_range": price_range,
             "first_listing_url": first_url,
             "first_listing_price": first_price,
+            "first_store": first_store,
             "fifth_listing_url": fifth_url,
-            "fifth_listing_price": fifth_price
+            "fifth_listing_price": fifth_price,
+            "fifth_store": fifth_store
         }
 
     except Exception as e:
