@@ -70,13 +70,13 @@ def search_bookfinder(book_isbn):
         driver.quit()
 
 # Example usage
-if __name__ == "__main__":
-    isbn = "9780735211735"
-    bookfinder_data = search_bookfinder(isbn)
-    if bookfinder_data:
-        print(f"Price Range: {bookfinder_data['price_range']}")
-        print(f"First Listing: [Link]({bookfinder_data['first_listing_url']})")
-        print(f"Fifth Listing: [Link]({bookfinder_data['fifth_listing_url']})")
-    else:
-        print("No suitable format found on BookFinder.")
+# if __name__ == "__main__":
+#     isbn = "9780735211735"
+#     bookfinder_data = search_bookfinder(isbn)
+#     if bookfinder_data:
+#         print(f"Price Range: {bookfinder_data['price_range']}")
+#         print(f"First Listing: [Link]({bookfinder_data['first_listing_url']})")
+#         print(f"Fifth Listing: [Link]({bookfinder_data['fifth_listing_url']})")
+#     else:
+#         print("No suitable format found on BookFinder.")
 

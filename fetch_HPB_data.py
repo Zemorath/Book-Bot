@@ -26,6 +26,8 @@ def search_book(book_title):
     results = soup.find(id="product-search-results")
     item_list = results.find_all("div", class_="product")
 
+    item_list = item_list[:5]
+
     search_results = []
     for item in item_list:
         title = item.find("a", class_="link")
