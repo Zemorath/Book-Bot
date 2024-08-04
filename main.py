@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from fetch_HPB_data import search_book
 from fetch_bookfinder_data import search_bookfinder
 from urllib.parse import urlparse
+from database import create_tables, add_book, remove_book, list_books
 
 load_dotenv()
 
@@ -87,9 +88,21 @@ class NavigationView(discord.ui.View):
         else:
             await interaction.channel.send('No suitable format found on BookFinder.')
 
+    @discord.ui.button(label='Add to Library', style=discord.ButtonStyle.secondary, emoji='📚')
+    async def add_to_library(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print(f"Add to Library button clicked by user: {interaction.user.id if interaction.user else 'Unknown'}")
+        if interaction.user and interaction.user.id != self.user_id:
+            await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
+            return
+
+        title, _, isbn, _, _ = self.search_results[self.index]
+        add_book(self.user_id, title, isbn)
+        await interaction.response.send_message(f'Added "{title}" to your library.', ephemeral=True)
+
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
+    create_tables()
 
 @client.event
 async def on_message(message):
@@ -99,6 +112,32 @@ async def on_message(message):
     if message.content.startswith('$search'):
         await message.channel.send('Please enter the book title:')
         search_requests[message.author.id] = {'stage': 'awaiting_title'}
+
+    elif message.content.startswith('$add'):
+        parts = message.content.split(maxsplit=2)
+        if len(parts) < 3:
+            await message.channel.send('Usage: $add <title> <isbn>')
+        else:
+            title, isbn = parts[1], parts[2]
+            add_book(message.author.id, title, isbn)
+            await message.channel.send(f'Added "{title}" to your library.')
+
+    elif message.content.startswith('$remove'):
+        parts = message.content.split(maxsplit=1)
+        if len(parts) < 2:
+            await message.channel.send('Usage: $remove <isbn>')
+        else:
+            isbn = parts[1]
+            remove_book(message.author.id, isbn)
+            await message.channel.send(f'Removed book with ISBN {isbn} from your library.')
+
+    elif message.content.startswith('$list'):
+        books = list_books(message.author.id)
+        if not books:
+            await message.channel.send('Your library is empty.')
+        else:
+            book_list = '\n'.join([f'{title} (ISBN: {isbn})' for title, isbn in books])
+            await message.channel.send(f'Your library:\n{book_list}')
 
     elif message.author.id in search_requests:
         user_request = search_requests[message.author.id]

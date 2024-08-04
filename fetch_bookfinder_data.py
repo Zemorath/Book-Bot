@@ -8,9 +8,9 @@ from selenium.webdriver.support import expected_conditions as EC
 BASE_URL = "https://www.bookfinder.com"
 MAX_LISTINGS = 5 
 
-def search_bookfinder(book_isbn):
-    query = book_isbn
-    URL = f"{BASE_URL}/isbn/{query}/?st=sr&ac=qr&mode=basic&author=&title=&isbn={query}&lang=en&destination=us&currency=USD&binding=*&keywords=&publisher=&min_year=&max_year=&minprice=&maxprice="
+def search_bookfinder(isbn):
+    query = isbn
+    URL = f"{BASE_URL}/search/?keywords={query}&currency=USD&destination=us&mode=basic&il=en&classic=off&lang=en&st=sh&ac=qr&submit="
     
     
     chrome_options = Options()
@@ -34,7 +34,7 @@ def search_bookfinder(book_isbn):
         with open('page_source.html', 'w', encoding='utf-8') as f:
             f.write(page_html)
         
-        listings = driver.find_elements(By.XPATH, "//strong/a[@class='clickout-logger']")
+        listings = driver.find_elements(By.XPATH, "//span[@class='results-price']/a")
 
 
         if len(listings) == 0:
