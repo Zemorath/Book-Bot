@@ -26,7 +26,7 @@ def search_bookfinder(isbn):
     
     try:
         WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "clickout-logger"))
+            EC.presence_of_element_located((By.CLASS_NAME, "results-price"))
         )
 
         
@@ -53,14 +53,14 @@ def search_bookfinder(isbn):
         fifth_price = fifth_listing.text.strip() if fifth_listing else "N/A"
         fifth_store = fifth_listing.get_attribute("data-ga-pageview-bookstore")
 
-        price_range = f"{first_price} - {fifth_price}"
+        price_range = f"{fifth_price} - {first_price}"
         return {
             "price_range": price_range,
             "first_listing_url": first_url,
-            "first_listing_price": first_price,
+            "first_listing_price": fifth_price,
             "first_store": first_store,
             "fifth_listing_url": fifth_url,
-            "fifth_listing_price": fifth_price,
+            "fifth_listing_price": first_price,
             "fifth_store": fifth_store
         }
 
@@ -68,15 +68,4 @@ def search_bookfinder(isbn):
         print(f"An error occurred: {e}")
     finally:
         driver.quit()
-
-# Example usage
-# if __name__ == "__main__":
-#     isbn = "9780735211735"
-#     bookfinder_data = search_bookfinder(isbn)
-#     if bookfinder_data:
-#         print(f"Price Range: {bookfinder_data['price_range']}")
-#         print(f"First Listing: [Link]({bookfinder_data['first_listing_url']})")
-#         print(f"Fifth Listing: [Link]({bookfinder_data['fifth_listing_url']})")
-#     else:
-#         print("No suitable format found on BookFinder.")
 

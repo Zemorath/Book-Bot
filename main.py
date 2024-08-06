@@ -1,8 +1,9 @@
 import discord
 import os
 from dotenv import load_dotenv
-from fetch_HPB_data import search_book
+from fetch_HPB_data import search_book as search_hpb
 from fetch_bookfinder_data import search_bookfinder
+from fetch_openlibrary_data import search_openlibrary
 from urllib.parse import urlparse
 from database import create_tables, add_book, remove_book, list_books
 
@@ -23,13 +24,10 @@ def is_valid_url(url):
     return bool(parsed.netloc) and bool(parsed.scheme)
 
 def create_message(search_results, index=0):
-    title, listing_url, isbn, image_url, prices = search_results[index]
-    price_text = " - ".join(prices) if prices else "N/A"
+    title, isbn, image_url = search_results[index]
     message = (f"**Result {index + 1} of {len(search_results)}**\n"
                f"**Title:** {title}\n"
-               f"**Price Range:** {price_text}\n"
-               f"**ISBN:** {isbn}\n"
-               f"**Link:** [HPB]({listing_url})\n")
+               f"**ISBN:** {isbn}\n")
     if is_valid_url(image_url):
         message += f"**Image:** {image_url}\n"
     return message
@@ -70,20 +68,37 @@ class NavigationView(discord.ui.View):
             await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
             return
 
-        title, listing_url, isbn, image_url, prices = self.search_results[self.index]
+        title, isbn, image_url = self.search_results[self.index]
         price_message = (f"**Title:** {title}\n"
-                         f"**Price Range:** {' - '.join(prices)}\n"
-                         f"**ISBN:** {isbn}\n"
-                         f"**Link:** {listing_url}")
+                         f"**ISBN:** {isbn}\n")
         await interaction.response.send_message(price_message)
         if is_valid_url(image_url):
             await interaction.channel.send(f"**Image:** {image_url}")
 
+        # Perform HPB search
+        hpb_results = search_hpb(title)
+        if hpb_results:
+            for idx, (hpb_title, hpb_url, hpb_isbn, hpb_image_url, hpb_prices) in enumerate(hpb_results):
+                hpb_price_text = " - ".join(hpb_prices) if hpb_prices else "N/A"
+                hpb_message = (f"**Match found at Half Price Books:**\n"
+                               f"**Title:** {hpb_title}\n"
+                               f"**Price Range:** {hpb_price_text}\n"
+                               f"**ISBN:** {hpb_isbn}\n"
+                               f"**Link:** [HPB]({hpb_url})\n")
+                await interaction.channel.send(hpb_message)
+                if is_valid_url(hpb_image_url):
+                    embed = discord.Embed()
+                    embed.set_image(url=hpb_image_url)
+                    await interaction.channel.send(embed=embed)
+        else:
+            await interaction.channel.send("No matches found at Half Price Books.")
+
+        # Perform BookFinder search
         bookfinder_data = search_bookfinder(isbn)
         if bookfinder_data:
             bookfinder_message = (f"**BookFinder Price Range:** {bookfinder_data['price_range']}\n"
-                                  f"**Range Minimum:** [{bookfinder_data['first_store']}]({bookfinder_data['first_listing_url']}) - {bookfinder_data['first_listing_price']}\n"
-                                  f"**Range Maximum:** [{bookfinder_data['fifth_store']}]({bookfinder_data['fifth_listing_url']}) - {bookfinder_data['fifth_listing_price']}")
+                                  f"**Range Minimum:** {bookfinder_data['first_listing_price']}\n"
+                                  f"**Range Maximum:** {bookfinder_data['fifth_listing_price']}")
             await interaction.channel.send(bookfinder_message)
         else:
             await interaction.channel.send('No suitable format found on BookFinder.')
@@ -95,7 +110,7 @@ class NavigationView(discord.ui.View):
             await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
             return
 
-        title, _, isbn, _, _ = self.search_results[self.index]
+        title, isbn, _ = self.search_results[self.index]
         add_book(self.user_id, title, isbn)
         await interaction.response.send_message(f'Added "{title}" to your library.', ephemeral=True)
 
@@ -144,7 +159,7 @@ async def on_message(message):
 
         if user_request['stage'] == 'awaiting_title':
             book_title = message.content.strip()
-            search_results = search_book(book_title)
+            search_results = search_openlibrary(book_title)
             if not search_results:
                 await message.channel.send('No results found.')
                 del search_requests[message.author.id]
