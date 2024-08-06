@@ -5,7 +5,7 @@ from fetch_HPB_data import search_book as search_hpb
 from fetch_bookfinder_data import search_bookfinder
 from fetch_openlibrary_data import search_openlibrary
 from urllib.parse import urlparse
-from database import create_tables, add_book, remove_book, list_books, update_rating, add_user
+from database import create_tables, add_book, remove_book, list_books, update_rating, add_user, db
 
 load_dotenv()
 
@@ -119,7 +119,7 @@ class AddToLibraryButton(discord.ui.Button):
             return
 
         title, isbn, image_url = self.book
-        add_book(self.user_id, title, isbn, image_url)
+        await add_book(self.user_id, title, isbn, image_url)
         await interaction.response.send_message(f'Added "{title}" to your library.', ephemeral=True)
 
 class LibraryView(discord.ui.View):
@@ -162,7 +162,7 @@ class LibraryView(discord.ui.View):
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
-    create_tables()
+    await create_tables()
 
 @client.event
 async def on_message(message):
@@ -179,7 +179,7 @@ async def on_message(message):
             await message.channel.send('Usage: $add <title> <isbn> <image_url>')
         else:
             title, isbn, image_url = parts[1], parts[2], parts[3]
-            add_book(message.author.id, title, isbn, image_url)
+            await add_book(message.author.id, title, isbn, image_url)
             await message.channel.send(f'Added "{title}" to your library.')
 
     elif message.content.startswith('$remove'):
@@ -188,11 +188,11 @@ async def on_message(message):
             await message.channel.send('Usage: $remove <isbn>')
         else:
             isbn = parts[1]
-            remove_book(message.author.id, isbn)
+            await remove_book(message.author.id, isbn)
             await message.channel.send(f'Removed book with ISBN {isbn} from your library.')
 
     elif message.content.startswith('$list'):
-        books = list_books(message.author.id)
+        books = await list_books(message.author.id)
         if not books:
             await message.channel.send('Your library is empty.')
         else:
@@ -208,7 +208,7 @@ async def on_message(message):
             try:
                 rating = int(parts[2])
                 if 1 <= rating <= 10:
-                    update_rating(message.author.id, isbn, rating)
+                    await update_rating(message.author.id, isbn, rating)
                     await message.channel.send(f'Updated rating for book with ISBN {isbn} to {rating}.')
                 else:
                     await message.channel.send('Rating must be between 1 and 10.')

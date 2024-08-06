@@ -1,101 +1,103 @@
-import sqlite3
+import aiosqlite
+import asyncio
 
-def create_tables():
-    with sqlite3.connect("library.db") as conn:
-        cursor = conn.cursor()
-        # Create users table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER UNIQUE
-            )
-        """)
-        
-        # Create books table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS books (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                isbn TEXT UNIQUE,
-                title TEXT,
-                image_url TEXT
-            )
-        """)
-        
-        # Create user_books table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS user_books (
-                user_id INTEGER,
-                book_id INTEGER,
-                rating INTEGER,
-                FOREIGN KEY(user_id) REFERENCES users(id),
-                FOREIGN KEY(book_id) REFERENCES books(id),
-                PRIMARY KEY (user_id, book_id)
-            )
-        """)
-        conn.commit()
+class Database:
+    def __init__(self, db_path="library.db"):
+        self.db_path = db_path
+        self.pool = None
 
-def add_user(user_id):
-    with sqlite3.connect("library.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR IGNORE INTO users (user_id) VALUES (?)
-        """, (user_id,))
-        conn.commit()
+    async def connect(self):
+        if self.pool is None:
+            self.pool = await aiosqlite.connect(self.db_path)
 
-def add_book(user_id, title, isbn, image_url=None, rating=None):
-    with sqlite3.connect("library.db") as conn:
-        cursor = conn.cursor()
-        # Add book to books table
-        cursor.execute("""
-            INSERT OR IGNORE INTO books (isbn, title, image_url) VALUES (?, ?, ?)
-        """, (isbn, title, image_url))
-        cursor.execute("SELECT id FROM books WHERE isbn = ?", (isbn,))
-        book_id = cursor.fetchone()[0]
-        
-        # Add user to users table
-        add_user(user_id)
-        cursor.execute("SELECT id FROM users WHERE user_id = ?", (user_id,))
-        user_db_id = cursor.fetchone()[0]
+    async def close(self):
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
 
-        # Add entry to user_books table
-        cursor.execute("""
-            INSERT OR REPLACE INTO user_books (user_id, book_id, rating) VALUES (?, ?, ?)
-        """, (user_db_id, book_id, rating))
-        conn.commit()
+    async def execute(self, query, params=()):
+        async with self.pool.execute(query, params) as cursor:
+            await self.pool.commit()
+            return cursor
 
-def remove_book(user_id, isbn):
-    with sqlite3.connect("library.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM books WHERE isbn = ?", (isbn,))
-        book_id = cursor.fetchone()[0]
-        cursor.execute("SELECT id FROM users WHERE user_id = ?", (user_id,))
-        user_db_id = cursor.fetchone()[0]
-        cursor.execute("""
-            DELETE FROM user_books WHERE user_id = ? AND book_id = ?
-        """, (user_db_id, book_id))
-        conn.commit()
+    async def fetchone(self, query, params=()):
+        async with self.pool.execute(query, params) as cursor:
+            return await cursor.fetchone()
 
-def list_books(user_id):
-    with sqlite3.connect("library.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE user_id = ?", (user_id,))
-        user_db_id = cursor.fetchone()[0]
-        cursor.execute("""
-            SELECT books.title, books.isbn, user_books.rating 
-            FROM books 
-            JOIN user_books ON books.id = user_books.book_id 
-            WHERE user_books.user_id = ?
-        """, (user_db_id,))
-        return cursor.fetchall()
+    async def fetchall(self, query, params=()):
+        async with self.pool.execute(query, params) as cursor:
+            return await cursor.fetchall()
 
-def update_rating(user_id, isbn, rating):
-    with sqlite3.connect("library.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM books WHERE isbn = ?", (isbn,))
-        book_id = cursor.fetchone()[0]
-        cursor.execute("SELECT id FROM users WHERE user_id = ?", (user_id,))
-        user_db_id = cursor.fetchone()[0]
-        cursor.execute("""
-            UPDATE user_books SET rating = ? WHERE user_id = ? AND book_id = ?
-        """, (rating, user_db_id, book_id))
-        conn.commit()
+db = Database()
+
+async def create_tables():
+    await db.connect()
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS books (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            isbn TEXT UNIQUE,
+            title TEXT,
+            image_url TEXT
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS user_books (
+            user_id INTEGER,
+            book_id INTEGER,
+            rating INTEGER,
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(book_id) REFERENCES books(id),
+            PRIMARY KEY (user_id, book_id)
+        )
+    """)
+
+async def add_user(user_id):
+    await db.execute("""
+        INSERT OR IGNORE INTO users (user_id) VALUES (?)
+    """, (user_id,))
+
+async def add_book(user_id, title, isbn, image_url=None, rating=None):
+    await db.execute("""
+        INSERT OR IGNORE INTO books (isbn, title, image_url) VALUES (?, ?, ?)
+    """, (isbn, title, image_url))
+    book_id = (await db.fetchone("SELECT id FROM books WHERE isbn = ?", (isbn,)))[0]
+    
+    await add_user(user_id)
+    user_db_id = (await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,)))[0]
+
+    await db.execute("""
+        INSERT OR REPLACE INTO user_books (user_id, book_id, rating) VALUES (?, ?, ?)
+    """, (user_db_id, book_id, rating))
+
+async def remove_book(user_id, isbn):
+    book_id = (await db.fetchone("SELECT id FROM books WHERE isbn = ?", (isbn,)))[0]
+    user_db_id = (await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,)))[0]
+    await db.execute("""
+        DELETE FROM user_books WHERE user_id = ? AND book_id = ?
+    """, (user_db_id, book_id))
+
+async def list_books(user_id):
+    user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    if user_db_id is None:
+        await add_user(user_id)
+        user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    user_db_id = user_db_id[0]
+    return await db.fetchall("""
+        SELECT books.title, books.isbn, user_books.rating 
+        FROM books 
+        JOIN user_books ON books.id = user_books.book_id 
+        WHERE user_books.user_id = ?
+    """, (user_db_id,))
+
+async def update_rating(user_id, isbn, rating):
+    book_id = (await db.fetchone("SELECT id FROM books WHERE isbn = ?", (isbn,)))[0]
+    user_db_id = (await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,)))[0]
+    await db.execute("""
+        UPDATE user_books SET rating = ? WHERE user_id = ? AND book_id = ?
+    """, (rating, user_db_id, book_id))
