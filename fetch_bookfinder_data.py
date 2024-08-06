@@ -6,12 +6,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 BASE_URL = "https://www.bookfinder.com"
-MAX_LISTINGS = 5 
+MAX_LISTINGS = 5
 
-def search_bookfinder(isbn):
-    query = isbn
-    URL = f"{BASE_URL}/search/?keywords={query}&currency=USD&destination=us&mode=basic&il=en&classic=off&lang=en&st=sh&ac=qr&submit="
-    
+def search_bookfinder(book_isbn):
+    query = book_isbn
+    URL = f"{BASE_URL}/isbn/{query}/?st=sr&ac=qr&mode=basic&author=&title=&isbn={query}&lang=en&destination=us&currency=USD&binding=*&keywords=&publisher=&min_year=&max_year=&minprice=&maxprice="
     
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
@@ -22,26 +21,18 @@ def search_bookfinder(isbn):
     
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.get(URL)
-
     
     try:
         WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "results-price"))
+            EC.presence_of_element_located((By.XPATH, "//span[@class='results-price']/a"))
         )
 
-        
-        page_html = driver.page_source
-        with open('page_source.html', 'w', encoding='utf-8') as f:
-            f.write(page_html)
-        
         listings = driver.find_elements(By.XPATH, "//span[@class='results-price']/a")
-
 
         if len(listings) == 0:
             print("No listings found.")
             return None
 
-        
         first_listing = listings[0] if len(listings) > 0 else None
         fifth_listing = listings[4] if len(listings) >= 5 else listings[-1] if len(listings) > 0 else None
         
@@ -53,14 +44,14 @@ def search_bookfinder(isbn):
         fifth_price = fifth_listing.text.strip() if fifth_listing else "N/A"
         fifth_store = fifth_listing.get_attribute("data-ga-pageview-bookstore")
 
-        price_range = f"{fifth_price} - {first_price}"
+        price_range = f"{first_price} - {fifth_price}"
         return {
             "price_range": price_range,
             "first_listing_url": first_url,
-            "first_listing_price": fifth_price,
+            "first_listing_price": first_price,
             "first_store": first_store,
             "fifth_listing_url": fifth_url,
-            "fifth_listing_price": first_price,
+            "fifth_listing_price": fifth_price,
             "fifth_store": fifth_store
         }
 
@@ -68,4 +59,3 @@ def search_bookfinder(isbn):
         print(f"An error occurred: {e}")
     finally:
         driver.quit()
-

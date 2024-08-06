@@ -5,7 +5,7 @@ from fetch_HPB_data import search_book as search_hpb
 from fetch_bookfinder_data import search_bookfinder
 from fetch_openlibrary_data import search_openlibrary
 from urllib.parse import urlparse
-from database import create_tables, add_book, remove_book, list_books
+from database import create_tables, add_book, remove_book, list_books, update_rating, add_user
 
 load_dotenv()
 
@@ -38,6 +38,7 @@ class NavigationView(discord.ui.View):
         self.user_id = user_id
         self.search_results = search_results
         self.index = 0
+        self.add_item(AddToLibraryButton(user_id, search_results[self.index]))
 
     @discord.ui.button(label='Previous', style=discord.ButtonStyle.primary, emoji='⬅️')
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -48,6 +49,7 @@ class NavigationView(discord.ui.View):
 
         if self.index > 0:
             self.index -= 1
+            self.children[-1].book = self.search_results[self.index]  # Update the book for the add to library button
             await interaction.response.edit_message(content=create_message(self.search_results, self.index), view=self)
 
     @discord.ui.button(label='Next', style=discord.ButtonStyle.primary, emoji='➡️')
@@ -59,6 +61,7 @@ class NavigationView(discord.ui.View):
 
         if self.index < len(self.search_results) - 1:
             self.index += 1
+            self.children[-1].book = self.search_results[self.index]  # Update the book for the add to library button
             await interaction.response.edit_message(content=create_message(self.search_results, self.index), view=self)
 
     @discord.ui.button(label='Select', style=discord.ButtonStyle.success, emoji='✅')
@@ -103,16 +106,58 @@ class NavigationView(discord.ui.View):
         else:
             await interaction.channel.send('No suitable format found on BookFinder.')
 
-    @discord.ui.button(label='Add to Library', style=discord.ButtonStyle.secondary, emoji='📚')
-    async def add_to_library(self, interaction: discord.Interaction, button: discord.ui.Button):
+class AddToLibraryButton(discord.ui.Button):
+    def __init__(self, user_id, book):
+        super().__init__(label='Add to Library', style=discord.ButtonStyle.secondary, emoji='📚')
+        self.user_id = user_id
+        self.book = book
+
+    async def callback(self, interaction: discord.Interaction):
         print(f"Add to Library button clicked by user: {interaction.user.id if interaction.user else 'Unknown'}")
         if interaction.user and interaction.user.id != self.user_id:
             await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
             return
 
-        title, isbn, _ = self.search_results[self.index]
-        add_book(self.user_id, title, isbn)
+        title, isbn, image_url = self.book
+        add_book(self.user_id, title, isbn, image_url)
         await interaction.response.send_message(f'Added "{title}" to your library.', ephemeral=True)
+
+class LibraryView(discord.ui.View):
+    def __init__(self, user_id, books, page_size=5):
+        super().__init__()
+        self.user_id = user_id
+        self.books = books
+        self.page_size = page_size
+        self.page_index = 0
+
+    def get_page(self):
+        start = self.page_index * self.page_size
+        end = start + self.page_size
+        page_books = self.books[start:end]
+        message = '\n'.join([f'{idx + 1}. **{title}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, isbn, rating) in enumerate(page_books)])
+        return message
+
+    @discord.ui.button(label='Previous', style=discord.ButtonStyle.primary, emoji='⬅️')
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print(f"Previous button clicked by user: {interaction.user.id if interaction.user else 'Unknown'}")
+        if interaction.user and interaction.user.id != self.user_id:
+            await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
+            return
+
+        if self.page_index > 0:
+            self.page_index -= 1
+            await interaction.response.edit_message(content=self.get_page(), view=self)
+
+    @discord.ui.button(label='Next', style=discord.ButtonStyle.primary, emoji='➡️')
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print(f"Next button clicked by user: {interaction.user.id if interaction.user else 'Unknown'}")
+        if interaction.user and interaction.user.id != self.user_id:
+            await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
+            return
+
+        if (self.page_index + 1) * self.page_size < len(self.books):
+            self.page_index += 1
+            await interaction.response.edit_message(content=self.get_page(), view=self)
 
 @client.event
 async def on_ready():
@@ -129,12 +174,12 @@ async def on_message(message):
         search_requests[message.author.id] = {'stage': 'awaiting_title'}
 
     elif message.content.startswith('$add'):
-        parts = message.content.split(maxsplit=2)
-        if len(parts) < 3:
-            await message.channel.send('Usage: $add <title> <isbn>')
+        parts = message.content.split(maxsplit=3)
+        if len(parts) < 4:
+            await message.channel.send('Usage: $add <title> <isbn> <image_url>')
         else:
-            title, isbn = parts[1], parts[2]
-            add_book(message.author.id, title, isbn)
+            title, isbn, image_url = parts[1], parts[2], parts[3]
+            add_book(message.author.id, title, isbn, image_url)
             await message.channel.send(f'Added "{title}" to your library.')
 
     elif message.content.startswith('$remove'):
@@ -151,8 +196,24 @@ async def on_message(message):
         if not books:
             await message.channel.send('Your library is empty.')
         else:
-            book_list = '\n'.join([f'{title} (ISBN: {isbn})' for title, isbn in books])
-            await message.channel.send(f'Your library:\n{book_list}')
+            view = LibraryView(message.author.id, books)
+            await message.channel.send(view.get_page(), view=view)
+
+    elif message.content.startswith('$rate'):
+        parts = message.content.split(maxsplit=2)
+        if len(parts) < 3:
+            await message.channel.send('Usage: $rate <isbn> <rating (1-10)>')
+        else:
+            isbn = parts[1]
+            try:
+                rating = int(parts[2])
+                if 1 <= rating <= 10:
+                    update_rating(message.author.id, isbn, rating)
+                    await message.channel.send(f'Updated rating for book with ISBN {isbn} to {rating}.')
+                else:
+                    await message.channel.send('Rating must be between 1 and 10.')
+            except ValueError:
+                await message.channel.send('Invalid rating. Please enter a number between 1 and 10.')
 
     elif message.author.id in search_requests:
         user_request = search_requests[message.author.id]
