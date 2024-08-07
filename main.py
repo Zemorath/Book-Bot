@@ -5,7 +5,7 @@ from fetch_HPB_data import search_book as search_hpb
 from fetch_bookfinder_data import search_bookfinder
 from fetch_openlibrary_data import search_openlibrary
 from urllib.parse import urlparse
-from database import db, add_book, remove_book, list_books, update_rating, mark_top_ten, list_top_ten
+from database import db, add_book, remove_book, list_books, update_rating, mark_top_ten, list_top_ten, list_books_by_author, list_books_by_rating, list_books_by_title
 
 load_dotenv()
 
@@ -24,9 +24,15 @@ def is_valid_url(url):
     return bool(parsed.netloc) and bool(parsed.scheme)
 
 def create_message(search_results, index=0):
-    title, isbn, image_url = search_results[index]
+    if len(search_results[index]) == 4:
+        title, author, isbn, image_url = search_results[index]
+    else:
+        title, author, isbn = search_results[index]
+        image_url = None
+
     message = (f"**Result {index + 1} of {len(search_results)}**\n"
                f"**Title:** {title}\n"
+               f"**Author:** {author}\n"
                f"**ISBN:** {isbn}\n")
     if is_valid_url(image_url):
         message += f"**Image:** {image_url}\n"
@@ -71,8 +77,9 @@ class NavigationView(discord.ui.View):
             await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
             return
 
-        title, isbn, image_url = self.search_results[self.index]
+        title, author, isbn, image_url = self.search_results[self.index]
         price_message = (f"**Title:** {title}\n"
+                         f"**Author:** {author}\n"
                          f"**ISBN:** {isbn}\n")
         await interaction.response.send_message(price_message)
         if is_valid_url(image_url):
@@ -118,9 +125,9 @@ class AddToLibraryButton(discord.ui.Button):
             await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
             return
 
-        title, isbn, image_url = self.book
-        await add_book(self.user_id, title, isbn, image_url)
-        await interaction.response.send_message(f'Added "{title}" to your library.', ephemeral=True)
+        title, author, isbn, image_url = self.book
+        await add_book(self.user_id, title, author, isbn, image_url)
+        await interaction.response.send_message(f'Added "{title}" by {author} to your library.', ephemeral=True)
 
 class LibraryView(discord.ui.View):
     def __init__(self, user_id, books, page_size=5):
@@ -134,7 +141,7 @@ class LibraryView(discord.ui.View):
         start = self.page_index * self.page_size
         end = start + self.page_size
         page_books = self.books[start:end]
-        message = '\n'.join([f'{idx + 1}. **{title}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, isbn, rating) in enumerate(page_books)])
+        message = '\n'.join([f'{idx + 1}. **{title}** by **{author}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, author, isbn, rating) in enumerate(page_books)])
         return message
 
     @discord.ui.button(label='Previous', style=discord.ButtonStyle.primary, emoji='⬅️')
@@ -174,13 +181,13 @@ async def on_message(message):
         search_requests[message.author.id] = {'stage': 'awaiting_title'}
 
     elif message.content.startswith('$add'):
-        parts = message.content.split(maxsplit=3)
-        if len(parts) < 4:
-            await message.channel.send('Usage: $add <title> <isbn> <image_url>')
+        parts = message.content.split(maxsplit=4)
+        if len(parts) < 5:
+            await message.channel.send('Usage: $add <title> <author> <isbn> <image_url>')
         else:
-            title, isbn, image_url = parts[1], parts[2], parts[3]
-            await add_book(message.author.id, title, isbn, image_url)
-            await message.channel.send(f'Added "{title}" to your library.')
+            title, author, isbn, image_url = parts[1], parts[2], parts[3], parts[4]
+            await add_book(message.author.id, title, author, isbn, image_url)
+            await message.channel.send(f'Added "{title}" by {author} to your library.')
 
     elif message.content.startswith('$remove'):
         parts = message.content.split(maxsplit=1)
@@ -192,12 +199,25 @@ async def on_message(message):
             await message.channel.send(f'Removed book with ISBN {isbn} from your library.')
 
     elif message.content.startswith('$list'):
-        books = await list_books(message.author.id)
-        if not books:
-            await message.channel.send('Your library is empty.')
+        parts = message.content.split(maxsplit=2)
+        if len(parts) == 2 and parts[1] == 'author':
+            await message.channel.send('Please enter the author name:')
+            search_requests[message.author.id] = {'stage': 'awaiting_author'}
+        elif len(parts) == 2 and parts[1] == 'rating':
+            await message.channel.send('Please enter the minimum rating:')
+            search_requests[message.author.id] = {'stage': 'awaiting_rating'}
+        elif len(parts) == 2 and parts[1] == 'title':
+            await message.channel.send('Please enter the title part:')
+            search_requests[message.author.id] = {'stage': 'awaiting_title_part'}
+        elif len(parts) == 1:
+            books = await list_books(message.author.id)
+            if not books:
+                await message.channel.send('Your library is empty.')
+            else:
+                view = LibraryView(message.author.id, books)
+                await message.channel.send(view.get_page(), view=view)
         else:
-            view = LibraryView(message.author.id, books)
-            await message.channel.send(view.get_page(), view=view)
+            await message.channel.send('Invalid command. Use $list author, $list rating, or $list title.')
 
     elif message.content.startswith('$rate'):
         parts = message.content.split(maxsplit=2)
@@ -238,7 +258,7 @@ async def on_message(message):
         if not books:
             await message.channel.send('Your top 10 list is empty.')
         else:
-            top_ten_message = '\n'.join([f'{idx + 1}. **{title}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, isbn, rating) in enumerate(books)])
+            top_ten_message = '\n'.join([f'{idx + 1}. **{title}** by **{author}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, author, isbn, rating) in enumerate(books)])
             await message.channel.send(f'**Your Top 10 Books:**\n{top_ten_message}')
 
     elif message.author.id in search_requests:
@@ -260,5 +280,38 @@ async def on_message(message):
             view = NavigationView(message.author.id, search_results)
             await message.channel.send(result_message, view=view)
             print("Sent initial message with navigation buttons")
+
+        elif user_request['stage'] == 'awaiting_author':
+            author = message.content.strip()
+            books = await list_books_by_author(message.author.id, author)
+            if not books:
+                await message.channel.send(f'No books by {author} found in your library.')
+            else:
+                author_books_message = '\n'.join([f'{idx + 1}. **{title}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, isbn, rating) in enumerate(books)])
+                await message.channel.send(f'**Books by {author} in Your Library:**\n{author_books_message}')
+            del search_requests[message.author.id]
+
+        elif user_request['stage'] == 'awaiting_rating':
+            try:
+                min_rating = int(message.content.strip())
+                books = await list_books_by_rating(message.author.id, min_rating)
+                if not books:
+                    await message.channel.send(f'No books with rating {min_rating} or higher found in your library.')
+                else:
+                    rating_books_message = '\n'.join([f'{idx + 1}. **{title}** by **{author}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, author, isbn, rating) in enumerate(books)])
+                    await message.channel.send(f'**Books with Rating {min_rating} or Higher in Your Library:**\n{rating_books_message}')
+            except ValueError:
+                await message.channel.send('Invalid rating. Please enter a number.')
+            del search_requests[message.author.id]
+
+        elif user_request['stage'] == 'awaiting_title_part':
+            title_part = message.content.strip()
+            books = await list_books_by_title(message.author.id, title_part)
+            if not books:
+                await message.channel.send(f'No books with title containing "{title_part}" found in your library.')
+            else:
+                title_books_message = '\n'.join([f'{idx + 1}. **{title}** by **{author}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, author, isbn, rating) in enumerate(books)])
+                await message.channel.send(f'**Books with Title Containing "{title_part}" in Your Library:**\n{title_books_message}')
+            del search_requests[message.author.id]
 
 client.run(os.getenv('TOKEN'))

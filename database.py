@@ -20,6 +20,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 isbn TEXT UNIQUE,
                 title TEXT,
+                author TEXT,
                 image_url TEXT
             )
         """)
@@ -59,10 +60,10 @@ async def add_user(user_id):
         INSERT OR IGNORE INTO users (user_id) VALUES (?)
     """, (user_id,))
 
-async def add_book(user_id, title, isbn, image_url=None, rating=None):
+async def add_book(user_id, title, author, isbn, image_url=None, rating=None):
     await db.execute("""
-        INSERT OR IGNORE INTO books (isbn, title, image_url) VALUES (?, ?, ?)
-    """, (isbn, title, image_url))
+        INSERT OR IGNORE INTO books (isbn, title, author, image_url) VALUES (?, ?, ?, ?)
+    """, (isbn, title, author, image_url))
     book_id = (await db.fetchone("SELECT id FROM books WHERE isbn = ?", (isbn,)))[0]
     
     await add_user(user_id)
@@ -86,7 +87,7 @@ async def list_books(user_id):
         user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
     user_db_id = user_db_id[0]
     return await db.fetchall("""
-        SELECT books.title, books.isbn, user_books.rating 
+        SELECT books.title, books.author, books.isbn, user_books.rating 
         FROM books 
         JOIN user_books ON books.id = user_books.book_id 
         WHERE user_books.user_id = ?
@@ -113,13 +114,54 @@ async def list_top_ten(user_id):
         user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
     user_db_id = user_db_id[0]
     return await db.fetchall("""
-        SELECT books.title, books.isbn, user_books.rating 
+        SELECT books.title, books.author, books.isbn, user_books.rating 
         FROM books 
         JOIN user_books ON books.id = user_books.book_id 
         WHERE user_books.user_id = ? AND user_books.top_ten = 1
         ORDER BY user_books.rating DESC, books.title
         LIMIT 10
     """, (user_db_id,))
+
+async def list_books_by_author(user_id, author):
+    user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    if user_db_id is None:
+        await add_user(user_id)
+        user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    user_db_id = user_db_id[0]
+    return await db.fetchall("""
+        SELECT books.title, books.isbn, user_books.rating 
+        FROM books 
+        JOIN user_books ON books.id = user_books.book_id 
+        WHERE user_books.user_id = ? AND books.author LIKE ?
+    """, (user_db_id, f"%{author}%"))
+
+async def list_books_by_rating(user_id, min_rating):
+    user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    if user_db_id is None:
+        await add_user(user_id)
+        user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    user_db_id = user_db_id[0]
+    return await db.fetchall("""
+        SELECT books.title, books.author, books.isbn, user_books.rating 
+        FROM books 
+        JOIN user_books ON books.id = user_books.book_id 
+        WHERE user_books.user_id = ? AND user_books.rating >= ?
+    """, (user_db_id, min_rating))
+
+async def list_books_by_title(user_id, title_part):
+    user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    if user_db_id is None:
+        await add_user(user_id)
+        user_db_id = await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    user_db_id = user_db_id[0]
+    return await db.fetchall("""
+        SELECT books.title, books.author, books.isbn, user_books.rating 
+        FROM books 
+        JOIN user_books ON books.id = user_books.book_id 
+        WHERE user_books.user_id = ? AND books.title LIKE ?
+    """, (user_db_id, f"%{title_part}%"))
+
+
 
 
 
