@@ -5,7 +5,7 @@ from fetch_HPB_data import search_book as search_hpb
 from fetch_bookfinder_data import search_bookfinder
 from fetch_openlibrary_data import search_openlibrary
 from urllib.parse import urlparse
-from database import create_tables, add_book, remove_book, list_books, update_rating, add_user, db
+from database import db, add_book, remove_book, list_books, update_rating, mark_top_ten, list_top_ten
 
 load_dotenv()
 
@@ -162,7 +162,7 @@ class LibraryView(discord.ui.View):
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
-    await create_tables()
+    await db.connect()
 
 @client.event
 async def on_message(message):
@@ -214,6 +214,32 @@ async def on_message(message):
                     await message.channel.send('Rating must be between 1 and 10.')
             except ValueError:
                 await message.channel.send('Invalid rating. Please enter a number between 1 and 10.')
+
+    elif message.content.startswith('$marktopten'):
+        parts = message.content.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.channel.send('Usage: $marktopten <isbn>')
+        else:
+            isbn = parts[1]
+            await mark_top_ten(message.author.id, isbn, True)
+            await message.channel.send(f'Marked book with ISBN {isbn} as one of your top 10.')
+
+    elif message.content.startswith('$unmarktopten'):
+        parts = message.content.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.channel.send('Usage: $unmarktopten <isbn>')
+        else:
+            isbn = parts[1]
+            await mark_top_ten(message.author.id, isbn, False)
+            await message.channel.send(f'Removed book with ISBN {isbn} from your top 10.')
+
+    elif message.content.startswith('$topten'):
+        books = await list_top_ten(message.author.id)
+        if not books:
+            await message.channel.send('Your top 10 list is empty.')
+        else:
+            top_ten_message = '\n'.join([f'{idx + 1}. **{title}** (ISBN: {isbn}) - Rating: {rating or "N/A"}' for idx, (title, isbn, rating) in enumerate(books)])
+            await message.channel.send(f'**Your Top 10 Books:**\n{top_ten_message}')
 
     elif message.author.id in search_requests:
         user_request = search_requests[message.author.id]
