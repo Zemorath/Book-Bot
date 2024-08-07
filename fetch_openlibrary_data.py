@@ -1,20 +1,45 @@
 import requests
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def search_openlibrary(query):
     base_url = "http://openlibrary.org/search.json"
-    params = {"title": query}
-    response = requests.get(base_url, params=params)
-    data = response.json()
+    params = {
+        "title": query,
+        "limit": 10
+    }
+    try:
+        response = requests.get(base_url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
 
-    search_results = []
-    for book in data.get("docs", [])[:10]:  # Limit to top 10 results
-        title = book.get("title", "N/A")
-        author = book.get("author_name", ["N/A"])[0]
-        isbn = book.get("isbn", ["N/A"])[0]
-        cover_id = book.get("cover_i", None)
-        if cover_id:
-            image_url = f"http://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
+        if 'docs' not in data:
+            logger.info("No 'docs' field found in response")
+            return []
+
+        search_results = []
+        for doc in data["docs"]:
+            title = doc.get("title", "N/A")
+            author = ", ".join(doc.get("author_name", ["N/A"]))
+            isbn_list = doc.get("isbn", [])
+            isbn = isbn_list[0] if isbn_list else "N/A"
+            search_results.append((title, author, isbn))
+
+        if not search_results:
+            logger.info("No search results found")
         else:
-            image_url = None
-        search_results.append((title, author, isbn, image_url))
-    return search_results
+            logger.info(f"Found {len(search_results)} results")
+
+        return search_results
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"An error occurred: {e}")
+        return []
+
+# Example usage
+if __name__ == "__main__":
+    results = search_openlibrary("The Way of Kings")
+    for result in results:
+        print(result)
