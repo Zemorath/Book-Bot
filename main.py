@@ -128,7 +128,12 @@ class AddToLibraryButton(discord.ui.Button):
             await interaction.response.send_message("You cannot interact with this message.", ephemeral=True)
             return
 
-        title, author, isbn, image_url = self.book
+        if len(self.book) == 4:
+            title, author, isbn, image_url = self.book
+        else:
+            title, author, isbn = self.book
+            image_url = None
+
         await add_book(self.user_id, title, author, isbn, image_url)
         await interaction.response.send_message(f'Added "{title}" by {author} to your library.', ephemeral=True)
 
@@ -271,11 +276,8 @@ async def on_message(message):
             if book_title.startswith('$'):  # Ignore commands
                 return
             
-            logger.info(f"Searching for book title: {book_title}")
-            
             search_results = search_openlibrary(book_title)
-
-            logger.info(f"Search results: {search_results}")
+            
             if not search_results:
                 await message.channel.send('No results found.')
                 del search_requests[message.author.id]

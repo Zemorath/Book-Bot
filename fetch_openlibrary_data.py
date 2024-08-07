@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 def search_openlibrary(query):
     base_url = "http://openlibrary.org/search.json"
+    cover_base_url = "http://covers.openlibrary.org/b/ISBN/"
     params = {
         "title": query,
         "limit": 10
@@ -25,7 +26,8 @@ def search_openlibrary(query):
             author = ", ".join(doc.get("author_name", ["N/A"]))
             isbn_list = doc.get("isbn", [])
             isbn = isbn_list[0] if isbn_list else "N/A"
-            search_results.append((title, author, isbn))
+            image_url = f"{cover_base_url}{isbn}-L.jpg" if isbn_list else None
+            search_results.append((title, author, isbn, image_url))
 
         if not search_results:
             logger.info("No search results found")
