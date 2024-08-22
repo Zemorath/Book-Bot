@@ -12,7 +12,6 @@ class BookClub(commands.Cog):
         self.db_lock = asyncio.Lock()
         self.check_join_phase.start_called = False
         self.check_poll_end.start_called = False
-        self.reminder_loop.start()  # Start the reminder loop
 
     async def connect_db(self):
         self.db = await aiosqlite.connect("book_club.db")
@@ -49,6 +48,9 @@ class BookClub(commands.Cog):
             self.check_poll_end.start()
             self.check_poll_end.start_called = True
 
+        if not self.reminder_loop.is_running():
+            self.reminder_loop.start()
+
         await self.connect_db()
 
     @tasks.loop(hours=1)
@@ -77,7 +79,7 @@ class BookClub(commands.Cog):
                     if datetime.now() > poll_end_time:
                         await self.end_poll(guild_id)
 
-    @tasks.loop(days=3)  # Reminder loop that runs every 3 days
+    @tasks.loop(hours=72)  # Reminder loop that runs every 3 days
     async def reminder_loop(self):
         async with self.db_lock:
             async with self.db.execute('SELECT guild_id, title, end_time, channel_id FROM book_clubs WHERE active = 1') as cursor:

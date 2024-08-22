@@ -35,6 +35,12 @@ class Database:
                 PRIMARY KEY (user_id, book_id)
             )
         """)
+        await self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS designated_channels (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER
+            )
+        """)
         await self.conn.commit()
 
     async def close(self):
@@ -70,7 +76,8 @@ async def add_book(user_id, title, author, isbn, image_url=None, rating=None):
     user_db_id = (await db.fetchone("SELECT id FROM users WHERE user_id = ?", (user_id,)))[0]
 
     await db.execute("""
-        INSERT OR REPLACE INTO user_books (user_id, book_id, rating, top_ten) VALUES (?, ?, ?, (SELECT top_ten FROM user_books WHERE user_id = ? AND book_id = ?))
+        INSERT OR REPLACE INTO user_books (user_id, book_id, rating, top_ten) 
+        VALUES (?, ?, ?, (SELECT top_ten FROM user_books WHERE user_id = ? AND book_id = ?))
     """, (user_db_id, book_id, rating, user_db_id, book_id))
 
 async def remove_book(user_id, isbn):
@@ -166,140 +173,10 @@ async def set_designated_channel(guild_id, channel_id):
         INSERT OR REPLACE INTO designated_channels (guild_id, channel_id) 
         VALUES (?, ?)
     """, (guild_id, channel_id))
-    await db.commit()
+    await db.conn.commit()
 
 async def get_designated_channel(guild_id):
     row = await db.fetchone("""
         SELECT channel_id FROM designated_channels WHERE guild_id = ?
     """, (guild_id,))
     return row[0] if row else None
-
-
-
-
-
-
-# import psycopg2
-# from psycopg2 import pool
-# import os
-
-# class Database:
-#     def __init__(self):
-#         self.db_pool = None
-
-#     def connect(self):
-#         if self.db_pool is None:
-#             self.db_pool = psycopg2.pool.SimpleConnectionPool(
-#                 1, 20,  # Adjust these numbers based on your needs
-#                 dbname=os.getenv('DB_NAME'),
-#                 user=os.getenv('DB_USER'),
-#                 password=os.getenv('DB_PASSWORD'),
-#                 host=os.getenv('DB_HOST'),
-#                 port=os.getenv('DB_PORT')
-#             )
-
-#     def close(self):
-#         if self.db_pool:
-#             self.db_pool.closeall()
-#             self.db_pool = None
-
-#     def execute(self, query, params=()):
-#         conn = self.db_pool.getconn()
-#         try:
-#             with conn.cursor() as cursor:
-#                 cursor.execute(query, params)
-#                 conn.commit()
-#         finally:
-#             self.db_pool.putconn(conn)
-
-#     def fetchone(self, query, params=()):
-#         conn = self.db_pool.getconn()
-#         try:
-#             with conn.cursor() as cursor:
-#                 cursor.execute(query, params)
-#                 return cursor.fetchone()
-#         finally:
-#             self.db_pool.putconn(conn)
-
-#     def fetchall(self, query, params=()):
-#         conn = self.db_pool.getconn()
-#         try:
-#             with conn.cursor() as cursor:
-#                 cursor.execute(query, params)
-#                 return cursor.fetchall()
-#         finally:
-#             self.db_pool.putconn(conn)
-
-# db = Database()
-
-# def create_tables():
-#     db.connect()
-#     db.execute("""
-#         CREATE TABLE IF NOT EXISTS users (
-#             id SERIAL PRIMARY KEY,
-#             user_id BIGINT UNIQUE
-#         )
-#     """)
-#     db.execute("""
-#         CREATE TABLE IF NOT EXISTS books (
-#             id SERIAL PRIMARY KEY,
-#             isbn VARCHAR(13) UNIQUE,
-#             title TEXT,
-#             image_url TEXT
-#         )
-#     """)
-#     db.execute("""
-#         CREATE TABLE IF NOT EXISTS user_books (
-#             user_id INTEGER REFERENCES users(id),
-#             book_id INTEGER REFERENCES books(id),
-#             rating INTEGER,
-#             PRIMARY KEY (user_id, book_id)
-#         )
-#     """)
-
-# def add_user(user_id):
-#     db.execute("""
-#         INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING
-#     """, (user_id,))
-
-# def add_book(user_id, title, isbn, image_url=None, rating=None):
-#     db.execute("""
-#         INSERT INTO books (isbn, title, image_url) VALUES (%s, %s, %s) ON CONFLICT (isbn) DO NOTHING
-#     """, (isbn, title, image_url))
-#     book_id = db.fetchone("SELECT id FROM books WHERE isbn = %s", (isbn,))[0]
-    
-#     add_user(user_id)
-#     user_db_id = db.fetchone("SELECT id FROM users WHERE user_id = %s", (user_id,))[0]
-
-#     db.execute("""
-#         INSERT INTO user_books (user_id, book_id, rating) VALUES (%s, %s, %s)
-#         ON CONFLICT (user_id, book_id) DO UPDATE SET rating = EXCLUDED.rating
-#     """, (user_db_id, book_id, rating))
-
-# def remove_book(user_id, isbn):
-#     book_id = db.fetchone("SELECT id FROM books WHERE isbn = %s", (isbn,))[0]
-#     user_db_id = db.fetchone("SELECT id FROM users WHERE user_id = %s", (user_id,))[0]
-#     db.execute("""
-#         DELETE FROM user_books WHERE user_id = %s AND book_id = %s
-#     """, (user_db_id, book_id))
-
-# def list_books(user_id):
-#     user_db_id = db.fetchone("SELECT id FROM users WHERE user_id = %s", (user_id,))
-#     if user_db_id is None:
-#         add_user(user_id)
-#         user_db_id = db.fetchone("SELECT id FROM users WHERE user_id = %s", (user_id,))
-#     user_db_id = user_db_id[0]
-#     return db.fetchall("""
-#         SELECT books.title, books.isbn, user_books.rating 
-#         FROM books 
-#         JOIN user_books ON books.id = user_books.book_id 
-#         WHERE user_books.user_id = %s
-#     """, (user_db_id,))
-
-# def update_rating(user_id, isbn, rating):
-#     book_id = db.fetchone("SELECT id FROM books WHERE isbn = %s", (isbn,))[0]
-#     user_db_id = db.fetchone("SELECT id FROM users WHERE user_id = %s", (user_id,))[0]
-#     db.execute("""
-#         UPDATE user_books SET rating = %s WHERE user_id = %s AND book_id = %s
-#     """, (rating, user_db_id, book_id))
-
