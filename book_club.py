@@ -10,7 +10,9 @@ class BookClub(commands.Cog):
         self.pending_requests = {}
         self.active_book_clubs = {}
         self.db_lock = asyncio.Lock()
-        self.check_join_phase.start()
+        self.check_join_phase.start_called = False
+        self.check_poll_end.start_called = False
+        self.reminder_loop.start()  # Start the reminder loop
 
     async def connect_db(self):
         self.db = await aiosqlite.connect("book_club.db")
@@ -39,20 +41,74 @@ class BookClub(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
+        if not self.check_join_phase.start_called:
+            self.check_join_phase.start()
+            self.check_join_phase.start_called = True
+
+        if not self.check_poll_end.start_called:
+            self.check_poll_end.start()
+            self.check_poll_end.start_called = True
+
         await self.connect_db()
 
-    @commands.command(name='create_book_club')
-    async def create_book_club(self, ctx, title: str, date: str, time: str, *, description: str):
-        """Starts the process to create a book club event"""
-        await ctx.send('Please specify the duration of the event (e.g., 1 week, 2 weeks, 1 month):')
-        self.pending_requests[ctx.author.id] = {
-            'ctx': ctx,
-            'guild_id': ctx.guild.id,
-            'title': title,
-            'date': date,
-            'time': time,
-            'description': description
-        }
+    @tasks.loop(hours=1)
+    async def check_join_phase(self):
+        async with self.db_lock:
+            async with self.db.execute('SELECT guild_id, join_phase_end_time, voting_enabled FROM book_clubs') as cursor:
+                async for row in cursor:
+                    guild_id, join_phase_end_time, voting_enabled = row
+                    join_phase_end_time = datetime.fromisoformat(join_phase_end_time)
+                    if datetime.now() > join_phase_end_time:
+                        channel = self.bot.get_channel(self.active_book_clubs[guild_id]['message_id'])
+                        if channel:
+                            await channel.send("The join phase for the book club has ended.")
+                        if voting_enabled:
+                            await self.start_book_poll(guild_id)
+                        async with self.db.execute('UPDATE book_clubs SET join_phase_end_time = NULL WHERE guild_id = ?', (guild_id,)):
+                            await self.db.commit()
+
+    @tasks.loop(hours=1)
+    async def check_poll_end(self):
+        async with self.db_lock:
+            async with self.db.execute('SELECT guild_id, poll_end_time FROM book_clubs WHERE poll_end_time IS NOT NULL') as cursor:
+                async for row in cursor:
+                    guild_id, poll_end_time = row
+                    poll_end_time = datetime.fromisoformat(poll_end_time)
+                    if datetime.now() > poll_end_time:
+                        await self.end_poll(guild_id)
+
+    @tasks.loop(days=3)  # Reminder loop that runs every 3 days
+    async def reminder_loop(self):
+        async with self.db_lock:
+            async with self.db.execute('SELECT guild_id, title, end_time, channel_id FROM book_clubs WHERE active = 1') as cursor:
+                async for row in cursor:
+                    guild_id, title, end_time_str, channel_id = row
+                    end_time = datetime.fromisoformat(end_time_str)
+                    time_remaining = end_time - datetime.now()
+
+                    if time_remaining.total_seconds() > 0:
+                        # Format the remaining time as days, hours, and minutes
+                        days, remainder = divmod(time_remaining.total_seconds(), 86400)
+                        hours, minutes = divmod(remainder, 3600)
+
+                        reminder_message = (
+                            f"Reminder: The book club '{title}' ends in "
+                            f"{int(days)} days, {int(hours)} hours, and {int(minutes // 60)} minutes."
+                        )
+
+                        # Get the designated channel
+                        channel = self.bot.get_channel(channel_id)
+                        if channel:
+                            await channel.send(reminder_message)
+
+                    else:
+                        # If the book club has ended, update the database to mark it as inactive
+                        await self.bot.db.execute('UPDATE book_clubs SET active = 0 WHERE guild_id = ? AND title = ?', (guild_id, title))
+                        await self.bot.db.commit()
+
+    @reminder_loop.before_loop
+    async def before_reminder_loop(self):
+        await self.bot.wait_until_ready()
 
     async def handle_duration(self, ctx, duration: str):
         request = self.pending_requests.pop(ctx.author.id, None)
@@ -230,22 +286,6 @@ class BookClub(commands.Cog):
         if guild_id in self.active_book_clubs:
             del self.active_book_clubs[guild_id]
 
-    @tasks.loop(hours=1)
-    async def check_join_phase(self):
-        async with self.db_lock:
-            async with self.db.execute('SELECT guild_id, join_phase_end_time, voting_enabled FROM book_clubs') as cursor:
-                async for row in cursor:
-                    guild_id, join_phase_end_time, voting_enabled = row
-                    join_phase_end_time = datetime.fromisoformat(join_phase_end_time)
-                    if datetime.now() > join_phase_end_time:
-                        channel = self.bot.get_channel(self.active_book_clubs[guild_id]['message_id'])
-                        if channel:
-                            await channel.send("The join phase for the book club has ended.")
-                        if voting_enabled:
-                            await self.start_book_poll(guild_id)
-                        async with self.db.execute('UPDATE book_clubs SET join_phase_end_time = NULL WHERE guild_id = ?', (guild_id,)):
-                            await self.db.commit()
-
     async def start_book_poll(self, guild_id):
         book_club = self.active_book_clubs.get(guild_id)
         if not book_club:
@@ -262,16 +302,6 @@ class BookClub(commands.Cog):
         poll = await channel.send(poll_message, view=BookPollView(self, guild_id, list(suggestions.keys())))
         book_club['poll_message_id'] = poll.id
         book_club['poll_end_time'] = datetime.now() + timedelta(days=1)
-
-    @tasks.loop(hours=1)
-    async def check_poll_end(self):
-        async with self.db_lock:
-            async with self.db.execute('SELECT guild_id, poll_end_time FROM book_clubs WHERE poll_end_time IS NOT NULL') as cursor:
-                async for row in cursor:
-                    guild_id, poll_end_time = row
-                    poll_end_time = datetime.fromisoformat(poll_end_time)
-                    if datetime.now() > poll_end_time:
-                        await self.end_poll(guild_id)
 
     async def end_poll(self, guild_id):
         book_club = self.active_book_clubs.get(guild_id)

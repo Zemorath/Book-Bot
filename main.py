@@ -6,10 +6,11 @@ from fetch_HPB_data import search_book as search_hpb
 from fetch_bookfinder_data import search_bookfinder
 from fetch_openlibrary_data import search_openlibrary
 from urllib.parse import urlparse
-from database import db, add_book, remove_book, list_books, update_rating, mark_top_ten, list_top_ten, list_books_by_author, list_books_by_rating, list_books_by_title
+from database import db, add_book, remove_book, list_books, update_rating, mark_top_ten, list_top_ten, list_books_by_author, list_books_by_rating, list_books_by_title, set_designated_channel, get_designated_channel
 from book_club import BookClub
 
 import logging
+import asyncio  # Import asyncio to handle locks
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='$', intents=intents)
+bot.db_lock = asyncio.Lock()  # Ensure the database lock is available globally
 
 search_requests = {}
 
@@ -179,21 +181,33 @@ async def on_ready():
 
 @bot.command(name='search')
 async def search(ctx):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     await ctx.send('Please enter the book title:')
     search_requests[ctx.author.id] = {'stage': 'awaiting_title'}
 
 @bot.command(name='add')
 async def add(ctx, title: str, author: str, isbn: str, image_url: str):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     await add_book(ctx.author.id, title, author, isbn, image_url)
     await ctx.send(f'Added "{title}" by {author} to your library.')
 
 @bot.command(name='remove')
 async def remove(ctx, isbn: str):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     await remove_book(ctx.author.id, isbn)
     await ctx.send(f'Removed book with ISBN {isbn} from your library.')
 
 @bot.command(name='list')
 async def list_books_command(ctx, filter_type: str = 'all', filter_value: str = None):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     if filter_type == 'all':
         books = await list_books(ctx.author.id)
         if not books:
@@ -235,6 +249,9 @@ async def list_books_command(ctx, filter_type: str = 'all', filter_value: str = 
 
 @bot.command(name='rate')
 async def rate(ctx, isbn: str, rating: int):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     if 1 <= rating <= 10:
         await update_rating(ctx.author.id, isbn, rating)
         await ctx.send(f'Updated rating for book with ISBN {isbn} to {rating}.')
@@ -243,16 +260,25 @@ async def rate(ctx, isbn: str, rating: int):
 
 @bot.command(name='marktopten')
 async def mark_top_ten_command(ctx, isbn: str):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     await mark_top_ten(ctx.author.id, isbn, True)
     await ctx.send(f'Marked book with ISBN {isbn} as one of your top 10.')
 
 @bot.command(name='unmarktopten')
-async def unmark_top_ten_command(ctx, isbn: str):
+async def unmark_topten_command(ctx, isbn: str):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     await mark_top_ten(ctx.author.id, isbn, False)
     await ctx.send(f'Removed book with ISBN {isbn} from your top 10.')
 
 @bot.command(name='topten')
 async def top_ten(ctx):
+    channel_id = await get_designated_channel(ctx.guild.id)
+    if channel_id and ctx.channel.id != channel_id:
+        return
     books = await list_top_ten(ctx.author.id)
     if not books:
         await ctx.send('Your top 10 list is empty.')
@@ -291,6 +317,90 @@ async def on_message(message):
             view = NavigationView(message.author.id, search_results)
             await message.channel.send(result_message, view=view)
 
+# Command to set the designated channel
+@bot.command(name='setchannel')
+@commands.has_permissions(administrator=True)
+async def set_designated_channel_command(ctx, channel: discord.TextChannel):
+    await set_designated_channel(ctx.guild.id, channel.id)
+    await ctx.send(f"Designated channel set to {channel.mention}.")
+
+# Remove the existing help command
+bot.remove_command('help')
+
+# Custom Help Command
+@bot.command(name='help')
+async def custom_help(ctx):
+    """Displays the help message."""
+    embed = discord.Embed(
+        title="Help - List of Commands",
+        description="Here are the available commands for the Book Club Bot:",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="$search",
+        value="Search for a book by entering its title.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$add <title> <author> <isbn> <image_url>",
+        value="Add a book to your library with the specified details.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$remove <isbn>",
+        value="Remove a book from your library using its ISBN.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$list [filter_type] [filter_value]",
+        value="List books in your library. Optionally filter by author, rating, or title.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$rate <isbn> <rating>",
+        value="Rate a book in your library between 1 and 10.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$marktopten <isbn>",
+        value="Mark a book as one of your top 10.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$unmarktopten <isbn>",
+        value="Remove a book from your top 10.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$topten",
+        value="List the top 10 books in your library.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$setchannel <channel>",
+        value="Set the designated channel where the bot will respond and send messages.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="$help",
+        value="Show this help message.",
+        inline=False
+    )
+
+    await ctx.send(embed=embed)
+
+# Register the BookClub cog
 bot.add_cog(BookClub(bot))
 
+# Run the bot
 bot.run(os.getenv('TOKEN'))

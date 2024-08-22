@@ -161,6 +161,20 @@ async def list_books_by_title(user_id, title_part):
         WHERE user_books.user_id = ? AND books.title LIKE ?
     """, (user_db_id, f"%{title_part}%"))
 
+async def set_designated_channel(guild_id, channel_id):
+    await db.execute("""
+        INSERT OR REPLACE INTO designated_channels (guild_id, channel_id) 
+        VALUES (?, ?)
+    """, (guild_id, channel_id))
+    await db.commit()
+
+async def get_designated_channel(guild_id):
+    row = await db.fetchone("""
+        SELECT channel_id FROM designated_channels WHERE guild_id = ?
+    """, (guild_id,))
+    return row[0] if row else None
+
+
 
 
 
